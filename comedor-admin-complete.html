@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Valoración del Comedor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        
+        const storage = {
+            async get(key) {
+                const value = localStorage.getItem(key);
+                return value ? { key, value } : null;
+            },
+            async set(key, value) {
+                localStorage.setItem(key, value);
+                return { key, value };
+            },
+            async list(prefix) {
+                const keys = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key.startsWith(prefix)) keys.push(key);
+                }
+                return { keys };
+            }
+        };
+
+        const DEFAULT_CATEGORIES = [
+            { key: 'sabor', label: 'Sabor de la Comida' },
+            { key: 'temperatura', label: 'Temperatura Adecuada' },
+            { key: 'porcion', label: 'Tamaño de la Porción' },
+            { key: 'limpieza', label: 'Limpieza del Área' }
+        ];
+
+        function App() {
+            const [mode, setMode] = useState('survey');
+            const [isAuth, setIsAuth] = useState(false);
+            const [pass, setPass] = useState('');
+            const [ratings, setRatings] = useState([]);
+            const [current, setCurrent] = useState({});
+            const [hover, setHover] = useState({});
+            const [submitted, setSubmitted] = useState(false);
+            const [clicks, setClicks] = useState(0);
+            const [currentStep, setCurrentStep] = useState(0);
+            const [dateFrom, setDateFrom] = useState('');
+            const [dateTo, setDateTo] = useState('');
+            const [timeFrom, setTimeFrom] = useState('');
+            const [timeTo, setTimeTo] = useState('');
+            const [cats, setCats] = useState(DEFAULT_CATEGORIES);
+            const [editingCats, setEditingCats] = useState([]);
+            const [adminView, setAdminView] = useState('stats');
+
+            const emojis = ['😟', '😐', '😄'];
+            const labels = ['Mal', 'Regular', 'Excelente'];
+
+            useEffect(() => { 
+                loadData();
+                loadCategories();
+            }, []);
+
+            useEffect(() => {
+                if (adminView === 'edit' && editingCats.length === 0) {
+                    setEditingCats(JSON.parse(JSON.stringify(cats)));
+                }
+            }, [adminView, cats]);
+
+            const loadData = async () => {
+                try {
+                    const r = await storage.list('rating:');
+                    if (r?.keys) {
+                        const data = await Promise.all(r.keys.map(async k => {
+                            const d = await storage.get(k);
+                            return d ? JSON.parse(d.value) : null;
+                        }));
+                        setRatings(data.filter(x => x));
+                    }
+                } catch(e) {}
+            };
+
+            const loadCategories = async () => {
+                try {
+                    const saved = await storage.get('categories');
+                    if (saved) {
+                        const loadedCats = JSON.parse(saved.value);
+                        setCats(loadedCats);
+                        
+                        const initialCurrent = {};
+                        loadedCats.forEach(cat => {
+                            initialCurrent[cat.key] = 0;
+                        });
+                        setCurrent(initialCurrent);
+                    } else {
+                        const initialCurrent = {};
+                        DEFAULT_CATEGORIES.forEach(cat => {
+                            initialCurrent[cat.key] = 0;
+                        });
+                        setCurrent(initialCurrent);
+                    }
+                } catch(e) {
+                    const initialCurrent = {};
+                    DEFAULT_CATEGORIES.forEach(cat => {
+                        initialCurrent[cat.key] = 0;
+                    });
+                    setCurrent(initialCurrent);
+                }
+            };
+
+            const saveCategories = async (newCats) => {
+                await storage.set('categories', JSON.stringify(newCats));
+                setCats(newCats);
+                
+                const newCurrent = {};
+                newCats.forEach(cat => {
+                    newCurrent[cat.key] = current[cat.key] || 0;
+                });
+                setCurrent(newCurrent);
+            };
+
+            const handleEmojiSelect = (value) => {
+                setCurrent(p => ({ ...p, [cats[currentStep].key]: value }));
+                
+                setTimeout(() => {
+                    if (currentStep < cats.length - 1) {
+                        setCurrentStep(currentStep + 1);
+                    } else {
+                        handleSubmit();
+                    }
+                }, 300);
+            };
+
+            const handleBack = () => {
+                if (currentStep > 0) {
+                    setCurrentStep(currentStep - 1);
+                }
+            };
+
+            const handleSubmit = async () => {
+                const nr = { ...current, timestamp: new Date().toISOString(), id: Date.now() };
+                await storage.set(`rating:${nr.id}`, JSON.stringify(nr));
+                setRatings(p => [...p, nr]);
+                setSubmitted(true);
+                setTimeout(() => { 
+                    const resetCurrent = {};
+                    cats.forEach(cat => {
+                        resetCurrent[cat.key] = 0;
+                    });
+                    setCurrent(resetCurrent);
+                    setSubmitted(false);
+                    setCurrentStep(0);
+                }, 4000);
+            };
+
+            const handleTitle = () => {
+                setClicks(p => p + 1);
+                if (clicks >= 4) { setMode('login'); setClicks(0); }
+                setTimeout(() => setClicks(0), 3000);
+            };
+
+            const handleLogin = () => {
+                if (pass === 'admin123') { setIsAuth(true); setMode('admin'); } else alert('Contraseña incorrecta');
+            };
+
+            const filtered = ratings.filter(r => {
+                const d = new Date(r.timestamp);
+                const ds = d.toISOString().split('T')[0];
+                const ts = d.toTimeString().slice(0, 5);
+                if (dateFrom && ds < dateFrom) return false;
+                if (dateTo && ds > dateTo) return false;
+                if (timeFrom && ts < timeFrom) return false;
+                if (timeTo && ts > timeTo) return false;
+                return true;
+            });
+
+            const avg = (cat, data = filtered) => {
+                if (!data.length) return 0;
+                const values = data.map(r => r[cat]).filter(v => v !== undefined);
+                if (!values.length) return 0;
+                return (values.reduce((a, v) => a + v, 0) / values.length).toFixed(1);
+            };
+
+            const avgAll = (data = filtered) => {
+                if (!data.length) return 0;
+                let t = 0;
+                let count = 0;
+                data.forEach(r => {
+                    cats.forEach(c => {
+                        if (r[c.key] !== undefined) {
+                            t += r[c.key];
+                            count++;
+                        }
+                    });
+                });
+                return count > 0 ? (t / count).toFixed(1) : 0;
+            };
+
+            const getEmoji = (v) => {
+                const index = Math.round(v) - 1;
+                return emojis[Math.max(0, Math.min(index, emojis.length - 1))];
+            };
+
+            const downloadExcel = () => {
+                const data = filtered.map(r => {
+                    const d = new Date(r.timestamp);
+                    const row = {
+                        'Fecha': d.toLocaleDateString('es'),
+                        'Hora': d.toLocaleTimeString('es')
+                    };
+                    cats.forEach(cat => {
+                        row[cat.label] = r[cat.key] || 'N/A';
+                    });
+                    const validValues = cats.map(c => r[c.key]).filter(v => v !== undefined);
+                    row['Promedio'] = validValues.length > 0 
+                        ? (validValues.reduce((a, v) => a + v, 0) / validValues.length).toFixed(1) 
+                        : 'N/A';
+                    return row;
+                });
+                
+                const avgRow = { 'Fecha': 'PROMEDIO', 'Hora': '' };
+                cats.forEach(cat => {
+                    avgRow[cat.label] = avg(cat.key);
+                });
+                avgRow['Promedio'] = avgAll();
+                data.push(avgRow);
+                
+                const ws = XLSX.utils.json_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, 'Valoraciones');
+                XLSX.writeFile(wb, `valoraciones_${new Date().toISOString().split('T')[0]}.xlsx`);
+            };
+
+            useEffect(() => {
+                if (adminView === 'edit' && editingCats.length === 0) {
+                    setEditingCats(JSON.parse(JSON.stringify(cats)));
+                }
+            }, [adminView]);
+
+            const updateCategoryLabel = (index, newLabel) => {
+                const updated = [...editingCats];
+                updated[index].label = newLabel;
+                setEditingCats(updated);
+            };
+
+            const addCategory = () => {
+                const newKey = `cat_${Date.now()}`;
+                setEditingCats([...editingCats, { key: newKey, label: 'Nueva Categoría' }]);
+            };
+
+            const deleteCategory = (index) => {
+                if (editingCats.length <= 1) {
+                    alert('Debe haber al menos una categoría');
+                    return;
+                }
+                const updated = editingCats.filter((_, i) => i !== index);
+                setEditingCats(updated);
+            };
+
+            const saveCategoriesChanges = async () => {
+                if (editingCats.some(cat => !cat.label.trim())) {
+                    alert('Todas las categorías deben tener un nombre');
+                    return;
+                }
+                await saveCategories(editingCats);
+                setAdminView('stats');
+                alert('Cambios guardados exitosamente');
+            };
+
+            const cancelEdit = () => {
+                setEditingCats([]);
+                setAdminView('stats');
+            };
+
+            const resetToDefault = async () => {
+                if (confirm('¿Estás seguro de restaurar las preguntas predeterminadas? Esto no borrará las valoraciones existentes.')) {
+                    await saveCategories(DEFAULT_CATEGORIES);
+                    setEditingCats([]);
+                    setAdminView('stats');
+                    alert('Preguntas restauradas a valores predeterminados');
+                }
+            };
+
+            // Funciones para Business Intelligence
+            useEffect(() => {
+                if (adminView === 'bi' && ratings.length > 0) {
+                    setTimeout(() => {
+                        createCharts();
+                    }, 100);
+                }
+            }, [adminView, ratings, cats]);
+
+            const createCharts = () => {
+                createTrendChart();
+                createCategoryComparisonChart();
+                createHourDistributionChart();
+                createSatisfactionDistributionChart();
+            };
+
+            const createTrendChart = () => {
+                const canvas = document.getElementById('trendChart');
+                if (!canvas) return;
+                
+                const ctx = canvas.getContext('2d');
+                if (window.trendChartInstance) {
+                    window.trendChartInstance.destroy();
+                }
+
+                // Agrupar por fecha
+                const dataByDate = {};
+                ratings.forEach(r => {
+                    const date = new Date(r.timestamp).toLocaleDateString('es');
+                    if (!dataByDate[date]) {
+                        dataByDate[date] = [];
+                    }
+                    dataByDate[date].push(r);
+                });
+
+                const dates = Object.keys(dataByDate).sort();
+                const avgByDate = dates.map(date => {
+                    const dayRatings = dataByDate[date];
+                    let total = 0;
+                    let count = 0;
+                    dayRatings.forEach(r => {
+                        cats.forEach(c => {
+                            if (r[c.key]) {
+                                total += r[c.key];
+                                count++;
+                            }
+                        });
+                    });
+                    return count > 0 ? (total / count).toFixed(2) : 0;
+                });
+
+                window.trendChartInstance = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: dates,
+                        datasets: [{
+                            label: 'Promedio de Satisfacción',
+                            data: avgByDate,
+                            borderColor: 'rgb(79, 70, 229)',
+                            backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            title: {
+                                display: true,
+                                text: 'Tendencia de Satisfacción en el Tiempo',
+                                font: { size: 16, weight: 'bold' }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 3,
+                                ticks: {
+                                    callback: function(value) {
+                                        return ['', 'Mal', 'Regular', 'Excelente'][value] || value;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            };
+
+            const createCategoryComparisonChart = () => {
+                const canvas = document.getElementById('categoryChart');
+                if (!canvas) return;
+                
+                const ctx = canvas.getContext('2d');
+                if (window.categoryChartInstance) {
+                    window.categoryChartInstance.destroy();
+                }
+
+                const avgData = cats.map(c => avg(c.key, ratings));
+                const colors = cats.map((_, i) => {
+                    const hue = (i * 360) / cats.length;
+                    return `hsl(${hue}, 70%, 60%)`;
+                });
+
+                window.categoryChartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: cats.map(c => c.label),
+                        datasets: [{
+                            label: 'Promedio',
+                            data: avgData,
+                            backgroundColor: colors,
+                            borderColor: colors.map(c => c.replace('60%', '50%')),
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            title: {
+                                display: true,
+                                text: 'Comparación por Categoría',
+                                font: { size: 16, weight: 'bold' }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 3,
+                                ticks: {
+                                    callback: function(value) {
+                                        return ['', 'Mal', 'Regular', 'Excelente'][value] || value;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            };
+
+            const createHourDistributionChart = () => {
+                const canvas = document.getElementById('hourChart');
+                if (!canvas) return;
+                
+                const ctx = canvas.getContext('2d');
+                if (window.hourChartInstance) {
+                    window.hourChartInstance.destroy();
+                }
+
+                // Agrupar por hora
+                const hourData = {};
+                ratings.forEach(r => {
+                    const hour = new Date(r.timestamp).getHours();
+                    if (!hourData[hour]) {
+                        hourData[hour] = 0;
+                    }
+                    hourData[hour]++;
+                });
+
+                const hours = Array.from({length: 24}, (_, i) => i);
+                const counts = hours.map(h => hourData[h] || 0);
+
+                window.hourChartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: hours.map(h => `${h}:00`),
+                        datasets: [{
+                            label: 'Valoraciones',
+                            data: counts,
+                            backgroundColor: 'rgba(34, 197, 94, 0.7)',
+                            borderColor: 'rgb(34, 197, 94)',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            title: {
+                                display: true,
+                                text: 'Distribución de Valoraciones por Hora',
+                                font: { size: 16, weight: 'bold' }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: { stepSize: 1 }
+                            }
+                        }
+                    }
+                });
+            };
+
+            const createSatisfactionDistributionChart = () => {
+                const canvas = document.getElementById('satisfactionChart');
+                if (!canvas) return;
+                
+                const ctx = canvas.getContext('2d');
+                if (window.satisfactionChartInstance) {
+                    window.satisfactionChartInstance.destroy();
+                }
+
+                const distribution = { 1: 0, 2: 0, 3: 0 };
+                ratings.forEach(r => {
+                    cats.forEach(c => {
+                        if (r[c.key]) {
+                            distribution[r[c.key]]++;
+                        }
+                    });
+                });
+
+                window.satisfactionChartInstance = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Mal', 'Regular', 'Excelente'],
+                        datasets: [{
+                            data: [distribution[1], distribution[2], distribution[3]],
+                            backgroundColor: [
+                                'rgba(239, 68, 68, 0.8)',
+                                'rgba(251, 191, 36, 0.8)',
+                                'rgba(34, 197, 94, 0.8)'
+                            ],
+                            borderColor: [
+                                'rgb(239, 68, 68)',
+                                'rgb(251, 191, 36)',
+                                'rgb(34, 197, 94)'
+                            ],
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: { font: { size: 14 } }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Distribución de Niveles de Satisfacción',
+                                font: { size: 16, weight: 'bold' }
+                            }
+                        }
+                    }
+                });
+            };
+
+            const calculateInsights = () => {
+                if (ratings.length === 0) return null;
+
+                // Mejor y peor categoría
+                const categoryAvgs = cats.map(c => ({
+                    label: c.label,
+                    avg: parseFloat(avg(c.key, ratings))
+                }));
+                const bestCategory = categoryAvgs.reduce((a, b) => a.avg > b.avg ? a : b);
+                const worstCategory = categoryAvgs.reduce((a, b) => a.avg < b.avg ? a : b);
+
+                // Hora con más actividad
+                const hourCounts = {};
+                ratings.forEach(r => {
+                    const hour = new Date(r.timestamp).getHours();
+                    hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+                });
+                const peakHour = Object.entries(hourCounts).reduce((a, b) => b[1] > a[1] ? b : a, [0, 0]);
+
+                // Tendencia (últimos 7 días vs anteriores)
+                const now = new Date();
+                const last7Days = ratings.filter(r => {
+                    const diff = now - new Date(r.timestamp);
+                    return diff < 7 * 24 * 60 * 60 * 1000;
+                });
+                const before7Days = ratings.filter(r => {
+                    const diff = now - new Date(r.timestamp);
+                    return diff >= 7 * 24 * 60 * 60 * 1000;
+                });
+
+                const avgLast7 = parseFloat(avgAll(last7Days));
+                const avgBefore7 = parseFloat(avgAll(before7Days));
+                const trend = avgLast7 > avgBefore7 ? 'mejorando' : avgLast7 < avgBefore7 ? 'empeorando' : 'estable';
+
+                return {
+                    bestCategory,
+                    worstCategory,
+                    peakHour: `${peakHour[0]}:00`,
+                    peakHourCount: peakHour[1],
+                    trend,
+                    trendDiff: (avgLast7 - avgBefore7).toFixed(2)
+                };
+            };
+
+            if (mode === 'login') {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-700 flex items-center justify-center p-4">
+                        <div className="bg-white rounded-2xl p-8 w-full max-w-md">
+                                <div className="text-center mb-6">
+                                    <div style={{ 
+                                        fontFamily: "'Georgia', serif", 
+                                        fontSize: "48px", 
+                                        fontWeight: "bold", 
+                                        color: "#9B1722",
+                                        letterSpacing: "2px",
+                                        textAlign: "center"
+                                    }}>MARRIOTT</div>
+                                    <div style={{
+                                        fontSize: "12px",
+                                        color: "#666",
+                                        letterSpacing: "3px",
+                                        marginTop: "5px"
+                                    }}>PANAMA</div>
+                                </div>
+                            <h1 className="text-2xl font-bold text-center mb-6">Panel de Administración</h1>
+                            <input type="password" value={pass} onChange={e => setPass(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleLogin()} placeholder="Contraseña" className="w-full px-4 py-3 border-2 rounded-lg mb-4" />
+                            <button onClick={handleLogin} className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold">Ingresar</button>
+                            <button onClick={() => setMode('survey')} className="w-full mt-2 text-gray-600">Volver</button>
+                            <p className="text-xs text-center mt-4 text-gray-500">Contraseña: admin123</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            if (mode === 'admin' && isAuth) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-700 p-4">
+                        <div className="max-w-6xl mx-auto">
+                            <div className="bg-white rounded-2xl p-6 mb-6">
+                                <div className="flex justify-between items-center mb-4">
+                                    <div className="flex items-center gap-4">
+                                        <div style={{ 
+                                            fontFamily: "'Georgia', serif", 
+                                            fontSize: "32px", 
+                                            fontWeight: "bold", 
+                                            color: "#9B1722",
+                                            letterSpacing: "1px"
+                                        }}>MARRIOTT</div>
+                                        <div>
+                                            <h1 className="text-2xl font-bold">Panel de Administración</h1>
+                                            <p className="text-gray-600">Estadísticas del Comedor</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => { setMode('survey'); setIsAuth(false); setAdminView('stats'); }} className="bg-red-600 text-white px-4 py-2 rounded-lg">Cerrar Sesión</button>
+                                </div>
+                                
+                                <div className="flex gap-2 border-t pt-4">
+                                    <button 
+                                        onClick={() => setAdminView('stats')}
+                                        className={`px-4 py-2 rounded-lg font-medium ${adminView === 'stats' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                                    >
+                                        📊 Estadísticas
+                                    </button>
+                                    <button 
+                                        onClick={() => setAdminView('edit')}
+                                        className={`px-4 py-2 rounded-lg font-medium ${adminView === 'edit' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                                    >
+                                        ✏️ Editar Preguntas
+                                    </button>
+                                    <button 
+                                        onClick={() => setAdminView('bi')}
+                                        className={`px-4 py-2 rounded-lg font-medium ${adminView === 'bi' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+                                    >
+                                        📈 Business Intelligence
+                                    </button>
+                                </div>
+                            </div>
+
+                            {adminView === 'bi' ? (
+                                <div className="space-y-6">
+                                    {ratings.length > 0 ? (
+                                        <>
+                                            {/* Insights Cards */}
+                                            {(() => {
+                                                const insights = calculateInsights();
+                                                return insights ? (
+                                                    <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                                                        <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4">
+                                                            <div className="text-sm text-green-600 font-medium mb-1">Mejor Categoría</div>
+                                                            <div className="text-lg font-bold text-green-800">{insights.bestCategory.label}</div>
+                                                            <div className="text-2xl font-bold text-green-600">{insights.bestCategory.avg.toFixed(1)} / 3</div>
+                                                        </div>
+                                                        <div className="bg-red-50 border-2 border-red-200 rounded-xl p-4">
+                                                            <div className="text-sm text-red-600 font-medium mb-1">Área de Mejora</div>
+                                                            <div className="text-lg font-bold text-red-800">{insights.worstCategory.label}</div>
+                                                            <div className="text-2xl font-bold text-red-600">{insights.worstCategory.avg.toFixed(1)} / 3</div>
+                                                        </div>
+                                                        <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+                                                            <div className="text-sm text-blue-600 font-medium mb-1">Hora Pico</div>
+                                                            <div className="text-2xl font-bold text-blue-800">{insights.peakHour}</div>
+                                                            <div className="text-sm text-blue-600">{insights.peakHourCount} valoraciones</div>
+                                                        </div>
+                                                        <div className={`${insights.trend === 'mejorando' ? 'bg-green-50 border-green-200' : insights.trend === 'empeorando' ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'} border-2 rounded-xl p-4`}>
+                                                            <div className={`text-sm font-medium mb-1 ${insights.trend === 'mejorando' ? 'text-green-600' : insights.trend === 'empeorando' ? 'text-red-600' : 'text-gray-600'}`}>Tendencia (7 días)</div>
+                                                            <div className={`text-2xl font-bold ${insights.trend === 'mejorando' ? 'text-green-800' : insights.trend === 'empeorando' ? 'text-red-800' : 'text-gray-800'}`}>
+                                                                {insights.trend === 'mejorando' ? '📈 Mejorando' : insights.trend === 'empeorando' ? '📉 Bajando' : '➡️ Estable'}
+                                                            </div>
+                                                            <div className={`text-sm ${insights.trend === 'mejorando' ? 'text-green-600' : insights.trend === 'empeorando' ? 'text-red-600' : 'text-gray-600'}`}>
+                                                                {insights.trendDiff > 0 ? '+' : ''}{insights.trendDiff}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : null;
+                                            })()}
+
+                                            {/* Charts Grid */}
+                                            <div className="grid md:grid-cols-2 gap-6">
+                                                <div className="bg-white rounded-xl p-6 shadow-lg">
+                                                    <div style={{ height: '300px' }}>
+                                                        <canvas id="trendChart"></canvas>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-white rounded-xl p-6 shadow-lg">
+                                                    <div style={{ height: '300px' }}>
+                                                        <canvas id="categoryChart"></canvas>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-white rounded-xl p-6 shadow-lg">
+                                                    <div style={{ height: '300px' }}>
+                                                        <canvas id="hourChart"></canvas>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-white rounded-xl p-6 shadow-lg">
+                                                    <div style={{ height: '300px' }}>
+                                                        <canvas id="satisfactionChart"></canvas>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Detailed Stats Table */}
+                                            <div className="bg-white rounded-xl p-6 shadow-lg">
+                                                <h3 className="text-xl font-bold mb-4">Estadísticas Detalladas</h3>
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full">
+                                                        <thead>
+                                                            <tr className="border-b-2 border-gray-200">
+                                                                <th className="text-left p-3 font-semibold">Categoría</th>
+                                                                <th className="text-center p-3 font-semibold">Promedio</th>
+                                                                <th className="text-center p-3 font-semibold">Mal</th>
+                                                                <th className="text-center p-3 font-semibold">Regular</th>
+                                                                <th className="text-center p-3 font-semibold">Excelente</th>
+                                                                <th className="text-center p-3 font-semibold">Total</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {cats.map(c => {
+                                                                const distribution = { 1: 0, 2: 0, 3: 0 };
+                                                                ratings.forEach(r => {
+                                                                    if (r[c.key]) distribution[r[c.key]]++;
+                                                                });
+                                                                const total = distribution[1] + distribution[2] + distribution[3];
+                                                                return (
+                                                                    <tr key={c.key} className="border-b border-gray-100 hover:bg-gray-50">
+                                                                        <td className="p-3 font-medium">{c.label}</td>
+                                                                        <td className="text-center p-3 font-bold text-indigo-600">{avg(c.key, ratings)}</td>
+                                                                        <td className="text-center p-3">{distribution[1]} ({total > 0 ? ((distribution[1]/total)*100).toFixed(0) : 0}%)</td>
+                                                                        <td className="text-center p-3">{distribution[2]} ({total > 0 ? ((distribution[2]/total)*100).toFixed(0) : 0}%)</td>
+                                                                        <td className="text-center p-3">{distribution[3]} ({total > 0 ? ((distribution[3]/total)*100).toFixed(0) : 0}%)</td>
+                                                                        <td className="text-center p-3 font-semibold">{total}</td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="bg-white rounded-xl p-12 text-center">
+                                            <div className="text-6xl mb-4">📊</div>
+                                            <h3 className="text-xl font-bold mb-2">No hay datos suficientes</h3>
+                                            <p className="text-gray-600">Se necesitan valoraciones para generar análisis e insights</p>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : adminView === 'edit' ? (
+                                <div className="bg-white rounded-2xl p-6">
+                                    <h2 className="text-xl font-bold mb-4">Editar Preguntas de la Encuesta</h2>
+                                    <p className="text-gray-600 mb-6">Personaliza las preguntas que verán los empleados. Los cambios se aplicarán inmediatamente.</p>
+                                    
+                                    <div className="space-y-4 mb-6">
+                                        {editingCats.map((cat, index) => (
+                                            <div key={cat.key} className="flex gap-3 items-center bg-gray-50 p-4 rounded-lg">
+                                                <span className="text-2xl font-bold text-gray-400 w-8">{index + 1}</span>
+                                                <input 
+                                                    type="text" 
+                                                    value={cat.label}
+                                                    onChange={(e) => updateCategoryLabel(index, e.target.value)}
+                                                    className="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none"
+                                                    placeholder="Nombre de la pregunta"
+                                                />
+                                                <button 
+                                                    onClick={() => deleteCategory(index)}
+                                                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium"
+                                                    disabled={editingCats.length <= 1}
+                                                >
+                                                    🗑️ Eliminar
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    <div className="flex gap-3 mb-6">
+                                        <button 
+                                            onClick={addCategory}
+                                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium"
+                                        >
+                                            ➕ Agregar Pregunta
+                                        </button>
+                                        <button 
+                                            onClick={resetToDefault}
+                                            className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium"
+                                        >
+                                            🔄 Restaurar Predeterminadas
+                                        </button>
+                                    </div>
+
+                                    <div className="border-t pt-6 flex gap-3">
+                                        <button 
+                                            onClick={saveCategoriesChanges}
+                                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-bold"
+                                        >
+                                            💾 Guardar Cambios
+                                        </button>
+                                        <button 
+                                            onClick={cancelEdit}
+                                            className="flex-1 bg-gray-400 hover:bg-gray-500 text-white py-3 rounded-lg font-bold"
+                                        >
+                                            ✖️ Cancelar
+                                        </button>
+                                    </div>
+
+                                    <div className="mt-6 bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                                        <h3 className="font-bold text-blue-800 mb-2">ℹ️ Información importante:</h3>
+                                        <ul className="text-sm text-blue-700 space-y-1">
+                                            <li>• Las preguntas existentes pueden ser editadas sin perder datos históricos</li>
+                                            <li>• Al eliminar una pregunta, sus datos históricos permanecen pero no se mostrarán</li>
+                                            <li>• Puedes tener entre 1 y 10 preguntas en la encuesta</li>
+                                            <li>• Los cambios se aplicarán inmediatamente para nuevas valoraciones</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="bg-white rounded-2xl p-6 mb-6">
+                                        <h2 className="font-bold mb-4">Filtros</h2>
+                                        <div className="grid md:grid-cols-2 gap-4 mb-4">
+                                            <div><label className="block text-sm mb-2">Fecha desde</label><input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-full px-4 py-2 border-2 rounded-lg" /></div>
+                                            <div><label className="block text-sm mb-2">Fecha hasta</label><input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-full px-4 py-2 border-2 rounded-lg" /></div>
+                                            <div><label className="block text-sm mb-2">Hora desde</label><input type="time" value={timeFrom} onChange={e => setTimeFrom(e.target.value)} className="w-full px-4 py-2 border-2 rounded-lg" /></div>
+                                            <div><label className="block text-sm mb-2">Hora hasta</label><input type="time" value={timeTo} onChange={e => setTimeTo(e.target.value)} className="w-full px-4 py-2 border-2 rounded-lg" /></div>
+                                        </div>
+                                        <div className="flex gap-3">
+                                            <button onClick={() => { setDateFrom(''); setDateTo(''); setTimeFrom(''); setTimeTo(''); }} className="bg-gray-600 text-white px-4 py-2 rounded-lg">Limpiar</button>
+                                            <button onClick={downloadExcel} disabled={!filtered.length} className="bg-green-600 text-white px-4 py-2 rounded-lg disabled:bg-gray-400">Descargar Excel</button>
+                                        </div>
+                                    </div>
+
+                                    {filtered.length > 0 ? (
+                                        <>
+                                            <div className="grid md:grid-cols-3 gap-6 mb-6">
+                                                <div className="bg-white rounded-2xl p-6 text-center">
+                                                    <div className="text-5xl mb-2">{getEmoji(avgAll())}</div>
+                                                    <div className="text-3xl font-bold text-indigo-600">{avgAll()}</div>
+                                                    <div className="text-sm text-gray-600">Promedio General</div>
+                                                </div>
+                                                <div className="bg-white rounded-2xl p-6 text-center">
+                                                    <div className="text-4xl font-bold text-green-600">{filtered.length}</div>
+                                                    <div className="text-sm text-gray-600">Valoraciones Mostradas</div>
+                                                </div>
+                                                <div className="bg-white rounded-2xl p-6 text-center">
+                                                    <div className="text-4xl font-bold text-blue-600">{ratings.length}</div>
+                                                    <div className="text-sm text-gray-600">Total Valoraciones</div>
+                                                </div>
+                                            </div>
+                                            <div className="bg-white rounded-2xl p-6">
+                                                <h2 className="text-xl font-bold mb-6">Promedios por Categoría</h2>
+                                                {cats.map(c => (
+                                                    <div key={c.key} className="bg-gray-50 rounded-xl p-5 mb-4">
+                                                        <div className="flex justify-between mb-2">
+                                                            <span className="font-medium">{c.label}</span>
+                                                            <span className="font-bold text-indigo-600 text-xl">{avg(c.key)}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="flex-1 bg-gray-200 rounded-full h-3">
+                                                                <div className="bg-gradient-to-r from-red-400 via-yellow-400 to-green-500 h-full rounded-full" style={{ width: `${(avg(c.key) / 3) * 100}%` }}></div>
+                                                            </div>
+                                                            <span className="text-2xl">{getEmoji(avg(c.key))}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <div className="bg-white rounded-2xl p-12 text-center">
+                                            <div className="text-6xl mb-4">📊</div>
+                                            <h3 className="text-xl font-bold mb-2">No hay valoraciones</h3>
+                                            <p className="text-gray-600">{ratings.length ? 'No hay resultados para los filtros' : 'Aún no hay valoraciones'}</p>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            const currentCat = cats[currentStep];
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 flex items-center justify-center">
+                    <div className="max-w-2xl w-full">
+                        <div className="bg-white rounded-2xl shadow-xl p-8">
+                            <div className="text-center mb-8">
+                                <div style={{ 
+                                    fontFamily: "'Georgia', serif", 
+                                    fontSize: "48px", 
+                                    fontWeight: "bold", 
+                                    color: "#9B1722",
+                                    letterSpacing: "2px",
+                                    marginBottom: "5px"
+                                }}>MARRIOTT</div>
+                                <div style={{
+                                    fontSize: "12px",
+                                    color: "#666",
+                                    letterSpacing: "3px",
+                                    marginBottom: "20px"
+                                }}>PANAMA</div>
+                                <h1 onClick={handleTitle} className="text-3xl font-bold text-gray-800 mb-2 cursor-pointer select-none">Valoración del Comedor de Empleados</h1>
+                                <p className="text-gray-600">Tu opinión nos ayuda a mejorar cada día</p>
+                            </div>
+
+                            {submitted ? (
+                                <div className="bg-green-50 border-2 border-green-500 rounded-xl p-8 text-center">
+                                    <div className="text-6xl mb-4">✓</div>
+                                    <h2 className="text-2xl font-bold text-green-700 mb-2">¡Gracias!</h2>
+                                    <p className="text-green-600 text-lg">Tu opinión nos ayudará a mejorar</p>
+                                </div>
+                            ) : (
+                                <div>
+                                    <div className="mb-8">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <span className="text-sm font-medium text-gray-600">Pregunta {currentStep + 1} de {cats.length}</span>
+                                            <span className="text-sm font-medium text-indigo-600">{Math.round(((currentStep + 1) / cats.length) * 100)}%</span>
+                                        </div>
+                                        <div className="w-full bg-gray-200 rounded-full h-2">
+                                            <div className="bg-indigo-600 h-2 rounded-full transition-all duration-300" style={{ width: `${((currentStep + 1) / cats.length) * 100}%` }}></div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-gray-50 rounded-xl p-8 mb-8">
+                                        <label className="block text-2xl font-bold text-center mb-8 text-gray-800">{currentCat.label}</label>
+                                        <div className="flex gap-6 justify-center flex-wrap">
+                                            {emojis.map((e, i) => {
+                                                const v = i + 1;
+                                                return (
+                                                    <div key={v} className="flex flex-col items-center">
+                                                        <button 
+                                                            onClick={() => handleEmojiSelect(v)} 
+                                                            onMouseEnter={() => setHover(p => ({ ...p, [currentCat.key]: v }))} 
+                                                            onMouseLeave={() => setHover(p => ({ ...p, [currentCat.key]: 0 }))} 
+                                                            className={`text-7xl md:text-8xl transition-all p-4 ${current[currentCat.key] === v || hover[currentCat.key] === v ? 'scale-110' : 'scale-100 opacity-70 hover:opacity-100'}`}
+                                                        >
+                                                            {e}
+                                                        </button>
+                                                        <span className="text-lg font-semibold text-gray-700 mt-2">{labels[i]}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        {current[currentCat.key] > 0 && (
+                                            <p className="text-center mt-6 text-xl font-bold text-indigo-600">
+                                                ✓ {labels[current[currentCat.key] - 1]}
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    {currentStep > 0 && (
+                                        <div className="flex justify-center">
+                                            <button 
+                                                onClick={handleBack} 
+                                                className="bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-8 rounded-xl text-lg transition-colors"
+                                            >
+                                                ← Anterior
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
